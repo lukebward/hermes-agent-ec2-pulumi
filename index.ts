@@ -6,8 +6,8 @@ import { renderUserData } from "./userdata";
 const config = new pulumi.Config();
 const publicKey = config.require("publicKey");
 const sshCidr = config.require("sshCidr");
-const openaiApiKey = config.requireSecret("openaiApiKey");
-const openaiModel = config.get("openaiModel") ?? "gpt-5";
+const googleApiKey = config.requireSecret("googleApiKey");
+const googleModel = config.get("googleModel") ?? "gemini-2.5-flash";
 const instanceType = config.get("instanceType") ?? "t4g.medium";
 
 const telegramBotToken = config.getSecret("telegramBotToken");
@@ -21,13 +21,13 @@ const name = "hermes";
 const network = createNetwork(name, { sshCidr });
 
 const userData: pulumi.Output<string> = telegramBotToken && telegramAllowedUsers
-    ? pulumi.all([openaiApiKey, telegramBotToken]).apply(([oai, tg]) =>
+    ? pulumi.all([googleApiKey, telegramBotToken]).apply(([key, tg]) =>
         renderUserData({
-            openaiApiKey: oai,
-            openaiModel,
+            googleApiKey: key,
+            googleModel,
             telegram: { botToken: tg, allowedUsers: telegramAllowedUsers },
         }))
-    : openaiApiKey.apply(key => renderUserData({ openaiApiKey: key, openaiModel }));
+    : googleApiKey.apply(key => renderUserData({ googleApiKey: key, googleModel }));
 
 const { instance, eip } = createInstance(name, {
     publicKey,

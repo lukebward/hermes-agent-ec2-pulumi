@@ -1,46 +1,70 @@
 # Hermes Agent on AWS EC2
 
-Pulumi (TypeScript) program that brings up a single `t4g.medium` EC2 instance, installs Nous Research's [Hermes Agent](https://hermes-agent.nousresearch.com/), and auto-starts the web dashboard plus an optional Telegram messaging gateway as systemd services.
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+[![Pulumi](https://img.shields.io/badge/Pulumi-TypeScript-8A3391?logo=pulumi&logoColor=white)](https://www.pulumi.com)
+[![AWS](https://img.shields.io/badge/AWS-EC2-FF9900?logo=amazon-aws&logoColor=white)](https://aws.amazon.com/ec2/)
+[![Hermes](https://img.shields.io/badge/Hermes_Agent-Nous_Research-7C3AED)](https://hermes-agent.nousresearch.com/)
+[![LLM](https://img.shields.io/badge/LLM-Gemini_2.5_Flash-1A73E8?logo=google&logoColor=white)](https://aistudio.google.com/)
 
-LLM: routes to OpenAI via Hermes' `custom` provider with `base_url=https://api.openai.com/v1`. Hermes' built-in "OpenAI Codex" provider is OAuth-only and not usable here; the `custom` path uses your API key directly. A reasoning model (`gpt-5`, `o3-mini`, `o1`, …) is required — see [Troubleshooting](#troubleshooting).
+Spin up Nous Research's [Hermes Agent](https://hermes-agent.nousresearch.com/) on a single ARM EC2 box with one `pulumi up`. The web dashboard and an optional Telegram bot auto-start as systemd services. Gemini's free tier handles the LLM side, so steady-state cost is just the instance (~$27/mo running, $0 stopped).
 
-## Prerequisites
+## Architecture
 
-- Pulumi CLI logged in (`pulumi login`)
-- AWS credentials in your shell (`aws sso login --profile <yours>`, then `export AWS_PROFILE=<yours>`)
-- An OpenAI API key with a billing limit set: <https://platform.openai.com/api-keys>
-- An SSH key at `~/.ssh/id_ed25519.pub` (or any other public key)
+```mermaid
+flowchart LR
+    Laptop([Your laptop])
+    TG([Telegram bot])
+    Gemini([Gemini API])
 
-## Deploy
+    subgraph EC2["EC2 · t4g.medium · Ubuntu 24.04 arm64"]
+        Dashboard["<b>hermes-dashboard.service</b><br/>127.0.0.1:9119"]
+        Gateway["<b>hermes-gateway.service</b>"]
+    end
+
+    Laptop -->|SSH :22| EC2
+    Laptop -.->|<i>ssh -L 9119</i>| Dashboard
+    TG <-->|long-poll| Gateway
+    Gateway -->|HTTPS| Gemini
+```
+
+## Quickstart
+
+> [!NOTE]
+> First-boot install (uv + Python 3.11 + Node 22 + ripgrep + ffmpeg + Hermes) takes ~5–10 min on a `t4g.medium`. `cloud-init status --wait` blocks until it's done.
 
 ```bash
+# 1. Auth
+pulumi login
+aws sso login --profile <yours> && export AWS_PROFILE=<yours>
+
+# 2. Config
 npm install
 pulumi stack init dev
 pulumi config set publicKey "$(cat ~/.ssh/id_ed25519.pub)"
-pulumi config set sshCidr "$(curl -s ifconfig.me)/32"
-pulumi config set --secret openaiApiKey 'sk-...'
+pulumi config set sshCidr   "$(curl -s ifconfig.me)/32"
+pulumi config set --secret googleApiKey 'AIza...'   # https://aistudio.google.com/apikey
 
-# optional — see "Add Telegram" below
-# pulumi config set --secret telegramBotToken '123456789:ABCdef...'
-# pulumi config set telegramAllowedUsers '987654321'
-
+# 3. Deploy
 pulumi up
 ssh ubuntu@$(pulumi stack output publicIp) 'cloud-init status --wait'
 ```
 
-`cloud-init status --wait` blocks until the Hermes installer (~5–10 min on first boot) finishes. When it returns `status: done`, both systemd services are running.
+That's it — the dashboard and gateway are running. To reach the dashboard from your laptop:
 
-## Use the web dashboard
-
-From your laptop:
 ```bash
 ssh -L 9119:localhost:9119 ubuntu@$(pulumi stack output publicIp)
+# then open http://localhost:9119
 ```
-Open <http://localhost:9119>. The dashboard binds to `127.0.0.1` on the box, so it's only reachable through the SSH tunnel.
 
-## Add Telegram
+> [!TIP]
+> The dashboard binds to `127.0.0.1` on the instance, so it's only reachable through the SSH tunnel. No public web port is exposed.
 
-1. In Telegram, message [@BotFather](https://t.me/BotFather), `/newbot`, follow prompts, copy the token.
+## Telegram bot (optional)
+
+<details>
+<summary><b>Add a Telegram interface</b> — message your bot, Hermes replies.</summary>
+
+1. In Telegram, message [@BotFather](https://t.me/BotFather): `/newbot` → follow prompts → copy the token.
 2. Message [@userinfobot](https://t.me/userinfobot) to get your numeric user ID.
 3. Set config and redeploy:
    ```bash
@@ -49,73 +73,66 @@ Open <http://localhost:9119>. The dashboard binds to `127.0.0.1` on the box, so 
    pulumi up
    ssh ubuntu@$(pulumi stack output publicIp) 'cloud-init status --wait'
    ```
-4. Message your bot in Telegram. Hermes replies.
+4. DM your bot. Hermes replies.
 
-To remove Telegram later: `pulumi config rm telegramBotToken && pulumi config rm telegramAllowedUsers && pulumi up`.
-
-## Verify
-
+To remove later:
 ```bash
-ssh ubuntu@$(pulumi stack output publicIp) '
-  systemctl is-active hermes-dashboard
-  systemctl is-active hermes-gateway 2>/dev/null || echo "gateway: not configured"
-  sudo journalctl -u hermes-dashboard -n 5 --no-pager
-'
+pulumi config rm telegramBotToken
+pulumi config rm telegramAllowedUsers
+pulumi up
 ```
 
-If something looks wrong, the bootstrap log is at `/var/log/hermes-bootstrap.log` on the box.
+</details>
 
-Live-tail the gateway as you message the bot (best for debugging chat issues):
-```bash
-ssh ubuntu@$(pulumi stack output publicIp) 'sudo journalctl -u hermes-gateway -f --no-pager'
-```
+## Operate
+
+| Action | Command |
+|---|---|
+| Service status | `ssh ubuntu@$(pulumi stack output publicIp) 'systemctl is-active hermes-dashboard hermes-gateway'` |
+| Live-tail the gateway as you chat | `ssh ubuntu@$(pulumi stack output publicIp) 'sudo journalctl -u hermes-gateway -f --no-pager'` |
+| Bootstrap log (cloud-init output) | `ssh ubuntu@$(pulumi stack output publicIp) 'sudo tail -50 /var/log/hermes-bootstrap.log'` |
+| Tear down everything | `pulumi destroy` |
 
 ## Troubleshooting
 
+<details>
+<summary><b>Common issues and fixes</b></summary>
+
 | Symptom | Cause | Fix |
 |---|---|---|
-| `REMOTE HOST IDENTIFICATION HAS CHANGED!` on SSH | The EC2 was replaced (e.g. user-data changed) and is a different machine | `ssh-keygen -R $(pulumi stack output publicIp)` |
-| Bot replies `Provider authentication failed. Check the configured credentials` | Wrong provider config in `~/.hermes/config.yaml` — likely `provider: codex` or `provider: openrouter` left over | Run the live fix from `userdata.ts` (or just `pulumi up` to redeploy) |
-| Gateway log says `HTTP 400: Encrypted content is not supported with this model` | You chose a non-reasoning OpenAI model (`gpt-4o`, `gpt-4`) | Switch to a reasoning model: `pulumi config set openaiModel gpt-5` and `pulumi up`, or live-patch with `hermes config set model.default gpt-5 && sudo systemctl restart hermes-gateway` |
-| Gateway log says `Primary provider auth failed: Unknown provider 'X'` | `model.provider` in `config.yaml` isn't one Hermes recognizes (see `hermes model` for the list) | Set it back to `custom` |
-| Gateway log says `No Codex credentials stored. Run hermes auth` | `provider: codex` was set; Codex requires OAuth, not an API key | Switch back to `provider: custom` with `base_url: https://api.openai.com/v1` |
+| `REMOTE HOST IDENTIFICATION HAS CHANGED!` on SSH | EC2 was replaced (user-data change) | `ssh-keygen -R $(pulumi stack output publicIp)` |
+| `HTTP 401: Missing Authentication header` in gateway log | Stale `base_url` from default Hermes config still pointing at OpenRouter | `ssh ... 'hermes config unset model.base_url && sudo systemctl restart hermes-gateway'` |
+| `HTTP 429: Resource has been exhausted` | Gemini free-tier rate limit | Wait a minute, or stay on `gemini-2.5-flash` (default — most generous free limits) |
+| `Primary provider auth failed: Unknown provider 'X'` | `model.provider` isn't one Hermes recognizes (`hermes model` shows the list) | Set it back to `gemini` |
 | `pulumi up` says it's replacing the instance | Any user-data change forces a replace (intentional) | Wait ~5–10 min for `cloud-init status --wait` after `up` |
-| `sudo hermes: command not found` | `hermes` is in `/home/ubuntu/.local/bin`, not on root's PATH | Use `bash -lc 'hermes …'` over SSH, or full path `/home/ubuntu/.hermes/hermes-agent/venv/bin/hermes` |
+| `sudo hermes: command not found` | `hermes` is in `/home/ubuntu/.local/bin`, not on root's `$PATH` | Use `bash -lc 'hermes …'` over SSH, or the full path `/home/ubuntu/.hermes/hermes-agent/venv/bin/hermes` |
 
-## Tear down
-
-```bash
-pulumi destroy
-```
-
-Releases the Elastic IP and the instance. Cloud-init / Hermes state on the disk is gone. `pulumi up` again starts fresh.
-
-## Cost
-
-~$27/mo while running (instance + EBS). ~$0 after `pulumi destroy`.
-
-## Files
-
-| File | Purpose |
-|---|---|
-| `index.ts` | Entry; reads config, exports outputs |
-| `network.ts` | Security group (SSH from `sshCidr`) |
-| `instance.ts` | AMI lookup, KeyPair, EC2, Elastic IP |
-| `userdata.ts` | Renders the cloud-init bootstrap script |
-
-## License
-
-MIT — see [LICENSE](LICENSE).
+</details>
 
 ## Config reference
 
-| Key | Required | Notes |
-|---|---|---|
-| `aws:region` | no (default `us-west-2`) | |
-| `publicKey` | yes | Your SSH public key, single line |
-| `sshCidr` | yes | CIDR allowed to SSH in, e.g. `1.2.3.4/32` |
-| `openaiApiKey` | yes (secret) | Hermes' LLM provider key |
-| `openaiModel` | no (default `gpt-5`) | Must be a reasoning model — `gpt-5`, `o3-mini`, `o1`, etc. Hermes requires encrypted-reasoning support, so non-reasoning models like `gpt-4o` won't work. |
-| `instanceType` | no (default `t4g.medium`) | Any ARM Graviton type that meets 4 GB RAM |
-| `telegramBotToken` | optional (secret) | If set, `telegramAllowedUsers` must also be set |
-| `telegramAllowedUsers` | optional | Comma-separated Telegram numeric user IDs |
+| Key | Required | Default | Notes |
+|---|---|---|---|
+| `aws:region` | no | `us-west-2` | |
+| `publicKey` | **yes** | — | Your SSH public key (single line) |
+| `sshCidr` | **yes** | — | CIDR allowed to SSH in, e.g. `1.2.3.4/32` |
+| `googleApiKey` | **yes** (secret) | — | Google AI Studio API key, free tier works |
+| `googleModel` | no | `gemini-2.5-flash` | Any Gemini model your key can access |
+| `instanceType` | no | `t4g.medium` | Any ARM Graviton type with ≥4 GB RAM |
+| `telegramBotToken` | optional (secret) | — | If set, `telegramAllowedUsers` must also be set |
+| `telegramAllowedUsers` | optional | — | Comma-separated Telegram numeric user IDs |
+
+## How it's wired
+
+| File | Role |
+|---|---|
+| [`index.ts`](index.ts) | Entry; reads config, exports outputs |
+| [`network.ts`](network.ts) | Security group (SSH from `sshCidr`) |
+| [`instance.ts`](instance.ts) | AMI lookup, KeyPair, EC2, Elastic IP |
+| [`userdata.ts`](userdata.ts) | Renders the cloud-init bootstrap script |
+
+The LLM side uses Hermes' native `gemini` provider (`GOOGLE_API_KEY` auth, no proxy). Switching providers is a one-line change in `userdata.ts` — see the [Hermes provider docs](https://hermes-agent.nousresearch.com/docs/integrations/providers).
+
+## License
+
+[MIT](LICENSE) © 2026 Luke Ward

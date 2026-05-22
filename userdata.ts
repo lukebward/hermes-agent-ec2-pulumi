@@ -4,8 +4,8 @@ export interface TelegramArgs {
 }
 
 export interface UserDataArgs {
-    openaiApiKey: string;
-    openaiModel: string;
+    googleApiKey: string;
+    googleModel: string;
     telegram?: TelegramArgs;
 }
 
@@ -16,7 +16,7 @@ const TG_USERS_HEREDOC = "HERMES_TG_USERS_EOF_e5f6";
 const GATEWAY_UNIT_HEREDOC = "HERMES_GATEWAY_UNIT_EOF_g7h8";
 
 export function renderUserData(args: UserDataArgs): string {
-    assertNoMarker(args.openaiApiKey, KEY_HEREDOC, "OpenAI API key");
+    assertNoMarker(args.googleApiKey, KEY_HEREDOC, "Google API key");
     if (args.telegram) {
         assertNoMarker(args.telegram.botToken, TG_TOKEN_HEREDOC, "Telegram bot token");
         assertNoMarker(args.telegram.allowedUsers, TG_USERS_HEREDOC, "Telegram allowed users");
@@ -35,15 +35,16 @@ apt-get install -y curl ca-certificates
 echo "[hermes-bootstrap] running Hermes installer as ubuntu user"
 sudo -u ubuntu -H bash -lc 'curl -fsSL https://raw.githubusercontent.com/NousResearch/hermes-agent/main/scripts/install.sh | bash'
 
-echo "[hermes-bootstrap] setting OpenAI key in hermes config"
-sudo -u ubuntu -H bash -lc 'hermes config set OPENAI_API_KEY "$(cat)"' <<'${KEY_HEREDOC}'
-${args.openaiApiKey}
+echo "[hermes-bootstrap] setting Google API key in hermes config"
+sudo -u ubuntu -H bash -lc 'hermes config set GOOGLE_API_KEY "$(cat)"' <<'${KEY_HEREDOC}'
+${args.googleApiKey}
 ${KEY_HEREDOC}
 
-echo "[hermes-bootstrap] pointing hermes at OpenAI via the custom (OpenAI-compatible) provider"
-sudo -u ubuntu -H bash -lc 'hermes config set model.provider custom'
-sudo -u ubuntu -H bash -lc 'hermes config set model.default ${args.openaiModel}'
-sudo -u ubuntu -H bash -lc 'hermes config set model.base_url https://api.openai.com/v1'
+echo "[hermes-bootstrap] pointing hermes at Gemini"
+sudo -u ubuntu -H bash -lc 'hermes config set model.provider gemini'
+sudo -u ubuntu -H bash -lc 'hermes config set model.default ${args.googleModel}'
+# Hermes ships with base_url=https://openrouter.ai/api/v1 by default; clear it so Gemini provider uses its own endpoint.
+sudo -u ubuntu -H bash -lc 'hermes config unset model.base_url' || sed -i '/^  base_url:/d' /home/ubuntu/.hermes/config.yaml
 ${args.telegram ? renderTelegramConfig(args.telegram) : ""}
 echo "[hermes-bootstrap] installing hermes-dashboard systemd unit"
 cat > /etc/systemd/system/hermes-dashboard.service <<'${UNIT_HEREDOC}'
