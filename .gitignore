@@ -1,0 +1,8 @@
+node_modules/
+bin/
+*.log
+.pulumi/
+
+# Pulumi stack files contain per-user config (SSH key, IP CIDR, Telegram IDs, encrypted secrets).
+# Each user creates their own via `pulumi stack init`. Pulumi.yaml (project file) is NOT ignored.
+Pulumi.*.yaml

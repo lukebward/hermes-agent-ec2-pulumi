@@ -1,0 +1,7 @@
+name: hermes-on-ec2
+runtime:
+  name: nodejs
+  options:
+    typescript: true
+    packagemanager: npm
+description: Hermes Agent running on a single cheap AWS EC2 instance.

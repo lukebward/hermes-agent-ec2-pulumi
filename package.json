@@ -1,0 +1,13 @@
+{
+  "name": "hermes-on-ec2",
+  "private": true,
+  "main": "index.ts",
+  "devDependencies": {
+    "@types/node": "^20",
+    "typescript": "^5.4"
+  },
+  "dependencies": {
+    "@pulumi/aws": "^6.50.0",
+    "@pulumi/pulumi": "^3.120.0"
+  }
+}
