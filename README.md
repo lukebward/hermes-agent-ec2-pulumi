@@ -4,8 +4,6 @@ Pulumi (TypeScript) program that brings up a single `t4g.medium` EC2 instance, i
 
 LLM: routes to OpenAI via Hermes' `custom` provider with `base_url=https://api.openai.com/v1`. Hermes' built-in "OpenAI Codex" provider is OAuth-only and not usable here; the `custom` path uses your API key directly. A reasoning model (`gpt-5`, `o3-mini`, `o1`, …) is required — see [Troubleshooting](#troubleshooting).
 
-Design notes: [docs/superpowers/specs/2026-05-22-hermes-agent-ec2-design.md](docs/superpowers/specs/2026-05-22-hermes-agent-ec2-design.md).
-
 ## Prerequisites
 
 - Pulumi CLI logged in (`pulumi login`)
